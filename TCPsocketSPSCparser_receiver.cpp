@@ -1,3 +1,5 @@
+// To do: validate BodyLength (9=) and CheckSum (10=) + sender checksum
+
 // server.cpp - receiver
 #include "SPSCqueue.h"
 #include "FIXparser.h"
@@ -46,21 +48,65 @@ int main() {
 	SOCKET clientSock = accept(listenSock, nullptr, nullptr);
 	std::cout << "Client connected\n";
 
-	// TCP recv thread (producer)
+	std::string streamBuffer;
 	std::thread recvThread([&] {
-		// continuously reads from TCPand enqueues messages
-		while (true) {
-			FixMessage msg{};
-			// blocking call - Reads up to sizeof(msg.data) bytes from clientSock
-			int bytes_read = recv(clientSock, msg.data, sizeof(msg.data), 0);
-			if (bytes_read <= 0) break; // we got no data
+		// TCP is a byte stream, NOT msg based
+		std::string streamBuffer;
+		streamBuffer.reserve(8192); // for demo purposes
 
-			msg.len = bytes_read;
-			while (!recvQueue.enqueue(msg)) {
-				_mm_pause();
+		while (true) {
+			char buf[4096]; // for demo purposes
+
+			// Reads TCP data into buf
+			int bytes_read = recv(clientSock, buf, sizeof(buf), 0);
+			if (bytes_read <= 0) // 0: connection closed, <0: error
+				break;
+
+			// Append raw TCP bytes (buf of size bytes_read) to stream buffer
+			streamBuffer.append(buf, bytes_read);
+
+			// Try to extract complete FIX messages
+			while (true) {
+				// Look for checksum tag
+				// Find checksum FIX tag "10=" - our FIX messages are delimited with | instead of SOH (0x01)
+				size_t checksumPos = streamBuffer.find("|10=");
+				// No checksum yet -> message incomplete.
+				if (checksumPos == std::string::npos)
+					break; // no checksum yet -> incomplete message
+
+				// Find end of checksum field - “Once I see 10=XYZ|, I know the message is complete.”
+				size_t endPos = streamBuffer.find('|', checksumPos + 4); // the checksum value is always 3 digits, zero-padded
+				// Search for delimiter after |10=.
+				if (endPos == std::string::npos)
+					break; // checksum field incomplete
+
+				endPos++; // include trailing '|'
+
+				// We now have a complete FIX message
+				FixMessage msg{};
+				msg.len = endPos;
+
+				// Bounds check: avoid buffer overflow
+				if (msg.len > sizeof(msg.data)) {
+					std::cerr << "FIX message too large, dropping\n";
+					streamBuffer.erase(0, endPos);
+					continue;
+				}
+
+				// Copies raw FIX message bytes into message struct.
+				memcpy(msg.data, streamBuffer.data(), msg.len);
+
+				// Enqueue (spin wait if queue is full)
+				while (!recvQueue.enqueue(msg)) {
+					_mm_pause();
+				}
+
+				// Remove processed message from stream buffer
+				streamBuffer.erase(0, endPos);
 			}
 		}
 		});
+
 
 	// FIX processing thread (consumer)
 	std::thread processor([&] {
