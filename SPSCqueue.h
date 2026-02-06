@@ -1,6 +1,3 @@
-// SPSC queue + FIX message
-
-#pragma once
 #include <atomic>
 #include <cstring>
 
@@ -41,6 +38,6 @@ private:
 };
 
 struct FixMessage {
-	char data[512];
+	char data[2048];
 	size_t len;
 };

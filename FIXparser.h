@@ -19,7 +19,7 @@ void run_test(bool (*fun)(), int& total, int& success) {
 
 bool parseField(const char*& start, const char* end, std::string_view& field) {
 	if (start >= end) return false;
-	const char soh = '|';
+	const char soh = '\x01';
 	const char* pos = start;
 	while (pos < end and *pos != soh) pos++;
 	if (pos >= end) return false;
@@ -59,3 +59,14 @@ ParserOutcomes parseMsg(std::string_view msg, std::vector<output>& get_out) {
 	}
 	return ParserOutcomes::good;
 }
+
+bool parseIntField(std::string_view field, int& value) {
+	value = 0;
+	for (char c : field) {
+		if (c < '0' || c > '9') return false;
+		value = value * 10 + (c - '0');
+	}
+	return true;
+}
+
+constexpr char SOH = '\x01';
