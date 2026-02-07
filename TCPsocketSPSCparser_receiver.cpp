@@ -1,8 +1,7 @@
-// to do: resync-safe, BodyLength+CheckSum compliant receiver
 #include "SPSCqueue.h"
 #include "FIXparser.h"
 #include <winsock2.h>
-#include <ws2tcpip.h> // Needed for converting "127.0.0.1" into a binary address.
+#include <ws2tcpip.h>
 #include <thread>
 #include <iostream>
 
@@ -23,7 +22,8 @@ int main() {
 	addr.sin_family = AF_INET;
 	addr.sin_port = htons(5001);
 	// addr.sin_addr.s_addr = INADDR_ANY; // listen on all local interfaces.
-	addr.sin_addr.s_addr = htonl((10 << 24) | (0 << 16) | (1 << 8) | 53); // listen to only 10.0.1.53 - Equivalent to inet_pton
+    // listen to only 10.0.1.53 - Equivalent to inet_pto
+	addr.sin_addr.s_addr = htonl((10 << 24) | (0 << 16) | (1 << 8) | 53);
 
 	bind(listenSock, (sockaddr*)&addr, sizeof(addr));
 	listen(listenSock, 1); // 1 pending connection only
@@ -99,6 +99,14 @@ int main() {
                 // missmatch: checksum-body length
                 if (checksumStart > streamBuffer.size()) break;
 
+                // MsgType(35 = ) must come immediately after BodyLength
+                if (streamBuffer.compare(bodyStart, 3, "35=") != 0) {
+                    // If not present then msg is malformed: Invalid FIX header - delete & start over
+                    std::cout << "35 is not after 9=" << std::endl;
+                    streamBuffer.erase(0, bodyStart);
+                    continue;
+                }
+
                 // last field 10= is exactly 7 bytes long (from checksumStart)
                 if (streamBuffer.size() < checksumStart + 7) break;
 
@@ -159,14 +167,14 @@ int main() {
 		while (true) {
 			if (recvQueue.dequeue(msg)) {
 				std::string fix(msg.data, msg.len);
-				std::cout << "FIX RECEIVED: " << fix << "\n";
+				std::cout << "FIX msg received: " << fix << "\n";
 				std::vector<output> get_out;
 				std::string_view msg = fix;
 				ParserOutcomes result = parseMsg(msg, get_out);
 
-				if (result == ParserOutcomes::good) std::cout << "Message parsed good" << std::endl;
-				else if (result == ParserOutcomes::unknown) std::cout << "Message parse  unknown" << std::endl;
-				else if (result == ParserOutcomes::bad) std::cout << "Message parse bad" << std::endl;
+				if (result == ParserOutcomes::good) std::cout << "Message: good" << std::endl;
+				else if (result == ParserOutcomes::unknown) std::cout << "Message: unknown" << std::endl;
+				else if (result == ParserOutcomes::bad) std::cout << "Message: bad" << std::endl;
 			}
 			else _mm_pause();
 		}
